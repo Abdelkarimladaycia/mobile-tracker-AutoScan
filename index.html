@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto Scan Tracker - Engineer HUD</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <style>
+        :root { --primary-glow: #00ffcc; --bg-glass: rgba(10, 15, 20, 0.90); }
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: 'Courier New', Courier, monospace; background-color: #0a0f14; overflow: hidden; color: var(--primary-glow); }
+        #map { height: 100vh; width: 100vw; z-index: 1; position: absolute; top: 0; left: 0; background-color: #0a0f14; }
+        .hud-container { position: absolute; top: 15px; right: 15px; left: 15px; max-width: 320px; margin: 0 auto; z-index: 999; background: var(--bg-glass); border: 1px solid var(--primary-glow); border-radius: 8px; padding: 12px 15px; box-shadow: 0 0 15px rgba(0, 255, 204, 0.3); backdrop-filter: blur(8px); direction: ltr; }
+        .hud-header { font-size: 1rem; font-weight: bold; text-align: center; margin-bottom: 10px; border-bottom: 1px dashed var(--primary-glow); padding-bottom: 8px; text-shadow: 0 0 5px var(--primary-glow); }
+        .hud-data { font-size: 0.85rem; line-height: 1.6; }
+        .status-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background-color: #ff3333; margin-right: 8px; box-shadow: 0 0 8px #ff3333; }
+        .status-dot.active { background-color: var(--primary-glow); box-shadow: 0 0 10px var(--primary-glow); animation: pulse 1s infinite alternate; }
+        @keyframes pulse { from { opacity: 1; transform: scale(1); } to { opacity: 0.5; transform: scale(1.2); } }
+        .radar-scan { position: absolute; bottom: 20px; left: 15px; right: 15px; max-width: 320px; margin: 0 auto; z-index: 999; background: var(--bg-glass); padding: 8px 12px; border: 1px solid var(--primary-glow); border-radius: 5px; font-weight: bold; font-size: 0.8rem; text-align: center; backdrop-filter: blur(8px); }
+    </style>
+</head>
+<body>
+    <div class="hud-container">
+        <div class="hud-header">ENGINEER HUD<br>AUTO SCAN TRACKER</div>
+        <div class="hud-data">
+            <div><span class="status-dot" id="status-dot"></span><span id="status-text">CONNECTING CLOUD...</span></div>
+            <hr style="border: 0.5px solid rgba(0, 255, 204, 0.3); margin: 8px 0;">
+            <div>LAT : <span id="lat">SCANNING...</span></div>
+            <div>LON : <span id="lon">SCANNING...</span></div>
+            <div>CLOUD SYNC : <span id="sync-status" style="color: yellow;">WAITING</span></div>
+        </div>
+    </div>
+    <div class="radar-scan">🛰️ BROADCASTING LIVE LOCATION</div>
+    <div id="map"></div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyBV52oK7kZvxsnH_zrXg3Etp6B96hZwC7U",
+            authDomain: "autoscan-95c2a.firebaseapp.com",
+            databaseURL: "https://autoscan-95c2a-default-rtdb.firebaseio.com",
+            projectId: "autoscan-95c2a",
+            storageBucket: "autoscan-95c2a.firebasestorage.app",
+            messagingSenderId: "883216178444",
+            appId: "1:883216178444:web:83746233e9e6ec2862fd29"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        var db = firebase.database();
+
+        var map = L.map('map', {zoomControl: false}).setView([36.74, 7.10], 14);
+        
+        // خريطة داكنة مجانية تماماً بدون أي مفاتيح API
+        L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', { maxZoom: 19 }).addTo(map);
+
+        var tacticalIcon = L.divIcon({
+            className: 'custom-div-icon',
+            html: "<div style='background-color:#00ffcc; width:18px; height:18px; border-radius:50%; box-shadow: 0 0 15px #00ffcc; border: 2px solid #fff;'></div>",
+            iconSize: [18, 18], iconAnchor: [9, 9]
+        });
+
+        var userMarker = null;
+        var elLat = document.getElementById('lat');
+        var elLon = document.getElementById('lon');
+        var elStatusDot = document.getElementById('status-dot');
+        var elStatusText = document.getElementById('status-text');
+        var elSync = document.getElementById('sync-status');
+
+        if ("geolocation" in navigator) {
+            navigator.geolocation.watchPosition(function(position) {
+                var lat = position.coords.latitude;
+                var lon = position.coords.longitude;
+
+                elLat.innerText = lat.toFixed(5);
+                elLon.innerText = lon.toFixed(5);
+                elStatusDot.classList.add('active');
+                elStatusText.innerText = "SYSTEM ACTIVE";
+
+                db.ref('engineerLocation').set({
+                    lat: lat,
+                    lon: lon,
+                    timestamp: Date.now()
+                }).then(() => {
+                    elSync.innerText = "SYNCED ✓";
+                    elSync.style.color = "#00ffcc";
+                }).catch(() => {
+                    elSync.innerText = "ERROR";
+                    elSync.style.color = "red";
+                });
+
+                var newLatLng = new L.LatLng(lat, lon);
+                if (!userMarker) {
+                    map.setView(newLatLng, 16);
+                    userMarker = L.marker(newLatLng, {icon: tacticalIcon}).addTo(map);
+                } else {
+                    userMarker.setLatLng(newLatLng);
+                    map.panTo(newLatLng);
+                }
+            }, function(error) {
+                elStatusText.innerText = "GPS ERROR";
+            }, { enableHighAccuracy: true });
+        }
+    </script>
+</body>
+</html>
